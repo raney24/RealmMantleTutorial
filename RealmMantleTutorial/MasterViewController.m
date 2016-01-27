@@ -8,8 +8,14 @@
 
 #import "MasterViewController.h"
 #import "DetailViewController.h"
+#import "APIManager.h"
+#import "RLMRealm.h"
+#import "RLMResults.h"
+#import "ArticleRealm.h"
 
 @interface MasterViewController ()
+
+@property (nonatomic, strong) RLMResults *articles;
 
 @end
 
@@ -17,12 +23,42 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    // Do any additional setup after loading the view, typically from a nib.
-    self.navigationItem.leftBarButtonItem = self.editButtonItem;
-
-    UIBarButtonItem *addButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAdd target:self action:@selector(insertNewObject:)];
-    self.navigationItem.rightBarButtonItem = addButton;
-    self.detailViewController = (DetailViewController *)[[self.splitViewController.viewControllers lastObject] topViewController];
+    
+    ArticleListRequestModel *requestModel = [ArticleListRequestModel new];
+    requestModel.query = @"Basketball";
+    requestModel.articlesToDate = [[ArticleListRequestModel dateFormatter] dateFromString:@"20150706"];
+    requestModel.articlesFromDate = [[ArticleListRequestModel dateFormatter] dateFromString:@"20150701"];
+    
+    [[APIManager sharedManager] getArticlesWithRequestModel:requestModel success:^(ArticleListResponseModel *responseModel) {
+        
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            @autoreleasepool {
+                
+                RLMRealm *realm = [RLMRealm defaultRealm];
+                [realm beginWriteTransaction];
+                [realm deleteAllObjects];
+                [realm commitWriteTransaction];
+                
+                [realm beginWriteTransaction];
+                for(ArticleModel *article in responseModel.articles){
+                    ArticleRealm *articleRealm = [[ArticleRealm alloc] initWithMantleModel:article];
+                    [realm addObject:articleRealm];
+                }
+                [realm commitWriteTransaction];
+                
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    RLMRealm *realmMainThread = [RLMRealm defaultRealm];
+                    RLMResults *articles = [ArticleRealm allObjectsInRealm:realmMainThread];
+                    self.articles = articles;
+                    [self.tableView reloadData];
+                });
+            }
+        });
+        
+    } failure:^(NSError *error) {
+        self.articles = [ArticleRealm allObjects];
+        [self.tableView reloadData];
+    }];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
